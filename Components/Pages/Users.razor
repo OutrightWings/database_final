@@ -1,0 +1,142 @@
+﻿@page "/Users"
+
+@inject MySqlConnection Db
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<h3>All Users</h3>
+<CascadingAuthenticationState>
+<AuthorizeView> 
+    <Authorized> 
+        @if (loading)
+        {
+            <p>Loading...</p>
+        }
+        else if (users.Count == 0)
+        {
+            <p>No users found.</p>
+        }
+        else
+        {
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>Email</th>
+                        <th>Created</th>
+                        <th></th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    @foreach (var u in users)
+                    {
+                        <tr>
+                            <td>@u.Id</td>
+                            <td>@u.Username</td>
+                            <td>@u.Email</td>
+                            <td>@u.Created.ToString("g")</td>
+                            <td>
+                                <button class="btn btn-danger btn-sm"
+                                        @onclick="() => DeleteUser(u.Id)">
+                                    Delete
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        <p class="text-danger">@error</p>
+
+    </Authorized> 
+    <NotAuthorized> 
+        <p>Not logged in</p> 
+    </NotAuthorized> 
+</AuthorizeView>
+</CascadingAuthenticationState>
+@code {
+    List<UserModel> users = new();
+    string error = "";
+    bool loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUsers();
+    }
+
+    // LOAD USERS FROM DATABASE
+    private async Task LoadUsers()
+    {
+        try
+        {
+            loading = true;
+            users.Clear();
+
+            await Db.OpenAsync();
+
+            var cmd = new MySqlCommand(
+                "SELECT id, username, email, create_datetime FROM users ORDER BY id ASC",
+                Db);
+
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                users.Add(new UserModel
+                {
+                    Id = reader.GetInt32("id"),
+                    Username = reader.GetString("username"),
+                    Email = reader.GetString("email"),
+                    Created = reader.GetDateTime("create_datetime")
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            error = $"ERROR: {ex.Message}";
+        }
+        finally
+        {
+            await Db.CloseAsync();
+            loading = false;
+        }
+    }
+
+    // DELETE USER BY ID
+    private async Task DeleteUser(int id)
+    {
+        try
+        {
+            await Db.OpenAsync();
+
+            var cmd = new MySqlCommand(
+                "DELETE FROM users WHERE id = @id LIMIT 1",
+                Db);
+
+            cmd.Parameters.AddWithValue("@id", id);
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (Exception ex)
+        {
+            error = $"ERROR: {ex.Message}";
+        }
+        finally
+        {
+            await Db.CloseAsync();
+        }
+
+        // Refresh the list
+        await LoadUsers();
+    }
+
+    public class UserModel
+    {
+        public int Id { get; set; }
+        public string Username { get; set; } = "";
+        public string Email { get; set; } = "";
+        public DateTime Created { get; set; }
+    }
+}

@@ -1,0 +1,48 @@
+﻿@page "/counter"
+
+@inject MySqlConnection Db
+@rendermode InteractiveServer
+
+<PageTitle>Counter</PageTitle>
+
+<h1>Counter</h1>
+
+<p role="status">Current count: @currentCount</p>
+
+<button class="btn btn-primary" @onclick="IncrementCount">Click me</button>
+
+<br /><br />
+
+<h3>Database Result:</h3>
+<p>@dbMessage</p>
+
+@code {
+    private int currentCount = 0;
+    private string? dbMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Db.OpenAsync();
+
+            var cmd = new MySqlCommand("SELECT NOW();", Db);
+            var result = await cmd.ExecuteScalarAsync();
+
+            dbMessage = $"Database connected! MySQL time: {result}";
+        }
+        catch (Exception ex)
+        {
+            dbMessage = $"DB Error: {ex.Message}";
+        }
+        finally
+        {
+            await Db.CloseAsync();
+        }
+    }
+
+    private void IncrementCount()
+    {
+        currentCount++;
+    }
+}

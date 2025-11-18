@@ -1,0 +1,148 @@
+﻿@page "/Signup"
+
+@inject MySqlConnection Db
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<h3>@(isSignupMode ? "Create Account" : "Login")</h3>
+
+<div class="mb-3">
+    <button class="btn btn-link" @onclick="() => SwitchMode(false)">Login</button>
+    <button class="btn btn-link" @onclick="() => SwitchMode(true)">Sign Up</button>
+</div>
+
+@if (isSignupMode)
+{
+    <!-- SIGNUP FORM -->
+    <div>
+        <input @bind="username" placeholder="Username" class="form-control" />
+        <input @bind="email" placeholder="Email" class="form-control mt-2" />
+        <input @bind="password" type="password" placeholder="Password" class="form-control mt-2" />
+
+        <button type="button" class="btn btn-primary mt-3" @onclick="CreateUser">
+            Create Account
+        </button>
+
+        <p class="text-danger">@signupError</p>
+    </div>
+}
+else
+{
+    <!-- LOGIN FORM -->
+    <div>
+        <input @bind="username" placeholder="Username" class="form-control" />
+        <input @bind="password" type="password" placeholder="Password" class="form-control mt-2" />
+
+        <button class="btn btn-primary mt-3" @onclick="DoLogin">
+            Login
+        </button>
+
+        <p class="text-danger">@loginError</p>
+    </div>
+}
+
+@code {
+    string username = "";
+    string password = "";
+    string email = "";
+
+    bool isSignupMode = false;
+
+    string loginError = "";
+    string signupError = "";
+
+    void SwitchMode(bool signup)
+    {
+        isSignupMode = signup;
+        loginError = "";
+        signupError = "";
+        username = "";
+        password = "";
+        email = "";
+    }
+
+    private async Task CreateUser()
+    {
+        signupError = "Processing...";
+
+        try
+        {
+            await Db.OpenAsync();
+
+            string hash = BCrypt.HashPassword(password);
+
+            var cmd = new MySqlCommand(
+                "INSERT INTO users (username, email, password, create_datetime) VALUES (@u, @e, @p, NOW())",
+                Db);
+
+            cmd.Parameters.AddWithValue("@u", username);
+            cmd.Parameters.AddWithValue("@e", email);
+            cmd.Parameters.AddWithValue("@p", hash);
+
+            int rows = await cmd.ExecuteNonQueryAsync();
+
+            if (rows > 0)
+            {
+                signupError = "";
+                isSignupMode = false; // switch to login mode
+            }
+            else
+            {
+                signupError = "Insert returned 0 rows.";
+            }
+        }
+        catch (Exception ex)
+        {
+            signupError = $"ERROR: {ex.Message}";
+        }
+        finally
+        {
+            await Db.CloseAsync();
+        }
+    }
+
+    private async Task DoLogin()
+    {
+        loginError = "Processing...";
+
+        try
+        {
+            await Db.OpenAsync();
+
+            var cmd = new MySqlCommand(
+                "SELECT password FROM users WHERE username=@u LIMIT 1", Db);
+            cmd.Parameters.AddWithValue("@u", username);
+
+            var result = await cmd.ExecuteScalarAsync();
+            if (result == null)
+            {
+                loginError = "Invalid username or password.";
+                return;
+            }
+
+            string storedHash = result.ToString()!;
+            if (!BCrypt.Verify(password, storedHash))
+            {
+                loginError = "Invalid username or password.";
+                return;
+            }
+
+            // success — log in
+            if (AuthenticationStateProvider is AuthStateProvider auth)
+                auth.SignIn(username);
+
+            Nav.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            loginError = $"ERROR: {ex.Message}";
+        }
+        finally
+        {
+            await Db.CloseAsync();
+        }
+    }
+
+    [Inject]
+    public AuthenticationStateProvider AuthenticationStateProvider { get; set; } = default!;
+}
