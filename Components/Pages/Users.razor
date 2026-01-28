@@ -1,61 +1,79 @@
 ﻿@page "/Users"
+@attribute [Authorize(Roles = "admin")]
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
 
 @inject MySqlConnection Db
 @inject NavigationManager Nav
+
 @rendermode InteractiveServer
 
 <h3>All Users</h3>
 <CascadingAuthenticationState>
-<AuthorizeView> 
-    <Authorized> 
-        @if (loading)
-        {
-            <p>Loading...</p>
-        }
-        else if (users.Count == 0)
-        {
-            <p>No users found.</p>
-        }
-        else
-        {
-            <table class="table table-striped">
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Username</th>
-                        <th>Email</th>
-                        <th>Created</th>
-                        <th></th>
-                    </tr>
-                </thead>
-
-                <tbody>
-                    @foreach (var u in users)
-                    {
+    <AuthorizeView Roles="admin">
+        <Authorized>
+            @if (loading)
+            {
+                <p>Loading...</p>
+            }
+            else if (users.Count == 0)
+            {
+                <p>No users found.</p>
+            }
+            else
+            {
+                <table class="table table-striped">
+                    <thead>
                         <tr>
-                            <td>@u.Id</td>
-                            <td>@u.Username</td>
-                            <td>@u.Email</td>
-                            <td>@u.Created.ToString("g")</td>
-                            <td>
-                                <button class="btn btn-danger btn-sm"
-                                        @onclick="() => DeleteUser(u.Id)">
-                                    Delete
-                                </button>
-                            </td>
+                            <th>ID</th>
+                            <th>Username</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                            <th>Created</th>
+                            <th>Actions</th>
                         </tr>
-                    }
-                </tbody>
-            </table>
-        }
+                    </thead>
 
-        <p class="text-danger">@error</p>
+                    <tbody>
+                        @foreach (var u in users)
+                        {
+                            <tr>
+                                <td>@u.Id</td>
+                                <td>@u.Username</td>
+                                <td>@u.Email</td>
 
-    </Authorized> 
-    <NotAuthorized> 
-        <p>Not logged in</p> 
-    </NotAuthorized> 
-</AuthorizeView>
+                                <td>
+                                    <select class="form-select form-select-sm"
+                                            value="@u.Role"
+                                            @onchange="e => ChangeRole(u.Id, e.Value!.ToString()!)">
+                                        <option value="student">Student</option>
+                                        <option value="faculty">Faculty</option>
+                                        <option value="admin">Admin</option>
+                                    </select>
+                                </td>
+
+                                <td>@u.Created.ToString("g")</td>
+
+                                <td>
+                                    <button class="btn btn-danger btn-sm"
+                                            @onclick="() => DeleteUser(u.Id)">
+                                        Delete
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            <p class="text-danger">@error</p>
+        </Authorized>
+
+        <NotAuthorized>
+            <p>Access denied.</p>
+        </NotAuthorized>
+    </AuthorizeView>
 </CascadingAuthenticationState>
 @code {
     List<UserModel> users = new();
@@ -67,7 +85,7 @@
         await LoadUsers();
     }
 
-    // LOAD USERS FROM DATABASE
+    // LOAD USERS
     private async Task LoadUsers()
     {
         try
@@ -78,7 +96,7 @@
             await Db.OpenAsync();
 
             var cmd = new MySqlCommand(
-                "SELECT id, username, email, create_datetime FROM users ORDER BY id ASC",
+                "SELECT id, username, email, role, create_datetime FROM users ORDER BY id ASC",
                 Db);
 
             using var reader = await cmd.ExecuteReaderAsync();
@@ -89,6 +107,7 @@
                     Id = reader.GetInt32("id"),
                     Username = reader.GetString("username"),
                     Email = reader.GetString("email"),
+                    Role = reader.GetString("role"),
                     Created = reader.GetDateTime("create_datetime")
                 });
             }
@@ -104,7 +123,38 @@
         }
     }
 
-    // DELETE USER BY ID
+    // CHANGE USER ROLE
+    private async Task ChangeRole(int userId, string newRole)
+    {
+        if (newRole != "student" && newRole != "faculty" && newRole != "admin")
+            return;
+
+        try
+        {
+            await Db.OpenAsync();
+
+            var cmd = new MySqlCommand(
+                "UPDATE users SET role=@r WHERE id=@id LIMIT 1",
+                Db);
+
+            cmd.Parameters.AddWithValue("@r", newRole);
+            cmd.Parameters.AddWithValue("@id", userId);
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (Exception ex)
+        {
+            error = $"ERROR: {ex.Message}";
+        }
+        finally
+        {
+            await Db.CloseAsync();
+        }
+
+        await LoadUsers();
+    }
+
+    // DELETE USER
     private async Task DeleteUser(int id)
     {
         try
@@ -112,7 +162,7 @@
             await Db.OpenAsync();
 
             var cmd = new MySqlCommand(
-                "DELETE FROM users WHERE id = @id LIMIT 1",
+                "DELETE FROM users WHERE id=@id LIMIT 1",
                 Db);
 
             cmd.Parameters.AddWithValue("@id", id);
@@ -128,7 +178,6 @@
             await Db.CloseAsync();
         }
 
-        // Refresh the list
         await LoadUsers();
     }
 
@@ -137,6 +186,7 @@
         public int Id { get; set; }
         public string Username { get; set; } = "";
         public string Email { get; set; } = "";
+        public string Role { get; set; } = "";
         public DateTime Created { get; set; }
     }
 }

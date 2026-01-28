@@ -9,7 +9,6 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 
-
 builder.Services.AddAuthorizationCore();
 builder.Services.AddScoped<AuthenticationStateProvider, AuthStateProvider>();
 builder.Services.AddTransient(_ =>
@@ -17,12 +16,12 @@ builder.Services.AddTransient(_ =>
     var connStr = builder.Configuration.GetConnectionString("DefaultConnection");
     return new MySqlConnection(connStr);
 });
-builder.Services.AddScoped<AuthenticationStateProvider, AuthStateProvider>();
-builder.Services.AddAuthentication(options =>
-{
-    options.DefaultAuthenticateScheme = null;
-    options.DefaultChallengeScheme = null;
-});
+// builder.Services.AddScoped<AuthenticationStateProvider, AuthStateProvider>();
+// builder.Services.AddAuthentication(options =>
+// {
+//     options.DefaultAuthenticateScheme = null;
+//     options.DefaultChallengeScheme = null;
+// });
 
 var app = builder.Build();
 
@@ -37,7 +36,7 @@ if (!app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseAntiforgery();
-
+app.UseAuthorization();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

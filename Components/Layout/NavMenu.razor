@@ -1,4 +1,6 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
+﻿@using Microsoft.AspNetCore.Components.Authorization
+
+<div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
         <a class="navbar-brand" href="">Database</a>
     </div>
@@ -8,23 +10,60 @@
 
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
     <nav class="nav flex-column">
+        <!-- Always visible -->
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
                 <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
             </NavLink>
         </div>
 
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="Signup">
-                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Log In/Sign Up
-            </NavLink>
-        </div>
-
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="Users">
-                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Test Page
-            </NavLink>
-        </div>
+        <!-- Not logged in -->
+        <CascadingAuthenticationState>
+        <AuthorizeView>
+            <NotAuthorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="Signup">
+                        <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Log In / Sign Up
+                    </NavLink>
+                </div>
+            </NotAuthorized>
+        </AuthorizeView>
+        </CascadingAuthenticationState>
+        <!-- Admin-only pages -->
+        <CascadingAuthenticationState>
+        <AuthorizeView Roles="admin">
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="Users">
+                        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Manage Users
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+        </CascadingAuthenticationState>
+        <!-- faculty-only pages -->
+        <CascadingAuthenticationState>
+        <AuthorizeView Roles="faculty">
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="Users">
+                        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Manage Users
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+        </CascadingAuthenticationState>
+        <!-- student-only pages -->
+        <CascadingAuthenticationState>
+        <AuthorizeView Roles="student">
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="Users">
+                        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Manage Users
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+        </CascadingAuthenticationState>
     </nav>
 </div>
-
