@@ -3,38 +3,38 @@
 
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
-@using System.Security.Claims
+@using System.Security.Claims;
 @inject AuthenticationStateProvider AuthStateProvider
 @inject MySqlConnection Db
-@inject StudentCode Sc
-@inject UserDocument Ud
 
 @rendermode InteractiveServer
 
-<h3>Student Approval Portal</h3>
+<h3>Faculty - Student Information</h3>
+
 <CascadingAuthenticationState>
     <AuthorizeView Roles="faculty">
         <Authorized Context="authContext">
 
-            <p>Enter a student code to load their information:</p>
-            <InputText @bind-Value="searchCode" placeholder="Enter code..." class="form-control mb-2"/>
-            <button class="btn btn-primary mb-3" @onclick="LoadStudentByCode">Load Student</button>
+            <h4>Lookup Student by Code</h4>
+            <input type="text" @bind="searchCode" placeholder="Enter student code" class="form-control w-25 d-inline" />
+            <button class="btn btn-primary ms-2" @onclick="LoadStudentByCode">Load Student</button>
 
-            @if (loading)
+            @if (studentId == null)
             {
-                <p>Loading...</p>
-            }
-            else if (!studentLoaded)
-            {
-                <p>No student loaded.</p>
+                <p class="text-muted mt-2">Enter a valid code to load student information.</p>
             }
             else
             {
                 <h4>Student Information</h4>
                 <p><strong>Student ID:</strong> @studentId</p>
 
-                <h4>Documents</h4>
-                @if (documents.Count == 0)
+                <h4 class="mt-4">Student Documents</h4>
+
+                @if (loadingDocuments)
+                {
+                    <p>Loading...</p>
+                }
+                else if (documents.Count == 0)
                 {
                     <p>No documents uploaded.</p>
                 }
@@ -44,15 +44,34 @@
                         @foreach (var doc in documents)
                         {
                             <li>
-                                <a href="@doc.FilePath" download="@doc.Filename">@doc.Filename</a>
+                                <a href="@doc.FilePath" download="@doc.Filename">@doc.Filename</a> 
                                 (Uploaded: @doc.UploadedAt.ToString("g"))
                             </li>
                         }
                     </ul>
                 }
 
-                <h4>Approval Codes</h4>
-                @if (codes.Count == 0)
+                <h5>Upload Document for Student</h5>
+                <InputFile OnChange="OnFilesSelected" multiple />
+
+                @if (selectedFiles.Count > 0)
+                {
+                    <ul>
+                        @foreach (var file in selectedFiles)
+                        {
+                            <li>@file.Name (@file.Size / 1024) KB</li>
+                        }
+                    </ul>
+
+                    <button class="btn btn-primary" @onclick="UploadSelectedFiles">Upload</button>
+                }
+
+                <h4 class="mt-4">Student Approval Codes</h4>
+                @if (loadingCodes)
+                {
+                    <p>Loading...</p>
+                }
+                else if (codes.Count == 0)
                 {
                     <p>No codes generated yet.</p>
                 }
@@ -89,7 +108,6 @@
                             }
                         </tbody>
                     </table>
-
                 }
             }
 
@@ -102,81 +120,98 @@
 </CascadingAuthenticationState>
 
 @code {
-    string searchCode = "";
-    int studentId;
-    bool studentLoaded = false;
-    bool loading = false;
-    string? currentCode;
+    // --- STATE ---
+    string? searchCode;
+    int? studentId;
     int? currentCodeId;
 
-
     List<UserDocument> documents = new();
+    List<IBrowserFile> selectedFiles = new();
     List<StudentCode> codes = new();
 
-    int facultyId;
-
-    protected override async Task OnInitializedAsync()
-    {
-        // Get faculty ID
-        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
-        var user = authState.User;
-        if (user.Identity?.IsAuthenticated == true)
-        {
-            facultyId = int.Parse(user.FindFirst(c => c.Type == ClaimTypes.NameIdentifier)!.Value);
-        }
-    }
+    bool loadingDocuments = false;
+    bool loadingCodes = false;
 
     private async Task LoadStudentByCode()
     {
         if (string.IsNullOrWhiteSpace(searchCode)) return;
 
-        loading = true;
-        studentLoaded = false;
-        documents.Clear();
-        codes.Clear();
+        await Db.OpenAsync();
 
-        try
+        var cmd = new MySqlCommand(
+            "SELECT id, user_id FROM student_codes WHERE code = @code LIMIT 1",
+            Db);
+        cmd.Parameters.AddWithValue("@code", searchCode);
+
+        using var reader = await cmd.ExecuteReaderAsync();
+        if (!reader.Read())
         {
-            await Db.OpenAsync();
-            currentCode = searchCode; 
-            var cmd = new MySqlCommand(
-                "SELECT id, user_id FROM student_codes WHERE code = @code LIMIT 1",
-                Db);
-            cmd.Parameters.AddWithValue("@code", searchCode);
-
-            using var reader = await cmd.ExecuteReaderAsync();
-            if (!reader.Read())
-            {
-                loading = false;
-                return;
-            }
-
-            currentCodeId = reader.GetInt32("id");
-            studentId = reader.GetInt32("user_id");
-
-            await LoadStudentDocuments();
-            await LoadStudentCodes();
-
-            studentLoaded = true;
-        }
-        finally
-        {
+            studentId = null;
+            currentCodeId = null;
+            documents.Clear();
+            codes.Clear();
             await Db.CloseAsync();
-            loading = false;
-            StateHasChanged();
+            return;
         }
+
+        currentCodeId = reader.GetInt32("id");
+        studentId = reader.GetInt32("user_id");
+        await Db.CloseAsync();
+
+        await LoadStudentDocuments();
+        await LoadStudentCodes();
+    }
+
+    private void OnFilesSelected(InputFileChangeEventArgs e)
+    {
+        selectedFiles.Clear();
+        foreach (var file in e.GetMultipleFiles())
+            selectedFiles.Add(file);
+    }
+
+    private async Task UploadSelectedFiles()
+    {
+        if (selectedFiles.Count == 0 || studentId == null) return;
+
+        var uploadFolder = Path.Combine("wwwroot", "uploads");
+        if (!Directory.Exists(uploadFolder))
+            Directory.CreateDirectory(uploadFolder);
+
+        foreach (var file in selectedFiles)
+        {
+            var timestamp = DateTime.Now.ToString("yyyyMMddHHmmssfff");
+            var uniqueName = $"{studentId}_{timestamp}_{file.Name}";
+            var path = Path.Combine(uploadFolder, uniqueName);
+
+            await using var fs = new FileStream(path, FileMode.Create);
+            await file.OpenReadStream().CopyToAsync(fs);
+
+            await Db.OpenAsync();
+            var cmd = new MySqlCommand(
+                "INSERT INTO user_documents(user_id, filename, file_path) VALUES (@uid, @fname, @fpath)",
+                Db);
+            cmd.Parameters.AddWithValue("@uid", studentId);
+            cmd.Parameters.AddWithValue("@fname", file.Name);
+            cmd.Parameters.AddWithValue("@fpath", $"/uploads/{uniqueName}");
+            await cmd.ExecuteNonQueryAsync();
+            await Db.CloseAsync();
+        }
+
+        selectedFiles.Clear();
+        await LoadStudentDocuments();
     }
 
     private async Task LoadStudentDocuments()
     {
+        if (studentId == null) return;
+
+        loadingDocuments = true;
         documents.Clear();
 
-        await using var conn = new MySqlConnection(Db.ConnectionString);
-        await conn.OpenAsync();
-
+        await Db.OpenAsync();
         var cmd = new MySqlCommand(
             "SELECT id, filename, file_path, uploaded_at FROM user_documents WHERE user_id=@uid ORDER BY uploaded_at DESC",
-            conn);
+            Db);
         cmd.Parameters.AddWithValue("@uid", studentId);
 
         using var reader = await cmd.ExecuteReaderAsync();
@@ -190,22 +225,25 @@
                 UploadedAt = reader.GetDateTime("uploaded_at")
             });
         }
+        await Db.CloseAsync();
+        loadingDocuments = false;
     }
 
     private async Task LoadStudentCodes()
     {
+        if (studentId == null) return;
+
+        loadingCodes = true;
         codes.Clear();
 
-        await using var conn = new MySqlConnection(Db.ConnectionString);
-        await conn.OpenAsync();
-
+        await Db.OpenAsync();
         var cmd = new MySqlCommand(@"
             SELECT sc.id, sc.code, sc.date_generated, sc.approved, sc.date_approved, sc.approval_userid, u.username AS approval_username
             FROM student_codes sc
             LEFT JOIN users u ON sc.approval_userid = u.id
             WHERE sc.user_id = @uid
             ORDER BY sc.date_generated DESC
-        ", conn);
+        ", Db);
         cmd.Parameters.AddWithValue("@uid", studentId);
 
         using var reader = await cmd.ExecuteReaderAsync();
@@ -222,6 +260,8 @@
                 ApprovalUsername = reader.IsDBNull(reader.GetOrdinal("approval_username")) ? null : reader.GetString(reader.GetOrdinal("approval_username"))
             });
         }
+        await Db.CloseAsync();
+        loadingCodes = false;
     }
 
     private async Task ApproveCode(int codeId) => await UpdateCodeApproval(codeId, true);
@@ -229,26 +269,20 @@
 
     private async Task UpdateCodeApproval(int codeId, bool approved)
     {
-        await using var conn = new MySqlConnection(Db.ConnectionString);
-        await conn.OpenAsync();
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var facultyId = int.Parse(user.FindFirst(c => c.Type == ClaimTypes.NameIdentifier)!.Value);
 
-        var cmd = new MySqlCommand(@"
-            UPDATE student_codes
-            SET approved = @approved,
-                date_approved = @date,
-                approval_userid = @facultyId
-            WHERE id = @codeId
-        ", conn);
-
+        await Db.OpenAsync();
+        var cmd = new MySqlCommand(
+            "UPDATE student_codes SET approved=@approved, date_approved=NOW(), approval_userid=@facultyId WHERE id=@id AND approved=0",
+            Db);
         cmd.Parameters.AddWithValue("@approved", approved);
-        cmd.Parameters.AddWithValue("@date", DateTime.Now);
         cmd.Parameters.AddWithValue("@facultyId", facultyId);
-        cmd.Parameters.AddWithValue("@codeId", codeId);
-
+        cmd.Parameters.AddWithValue("@id", codeId);
         await cmd.ExecuteNonQueryAsync();
+        await Db.CloseAsync();
 
-        // Reload codes to reflect approval
         await LoadStudentCodes();
-        StateHasChanged();
     }
 }
