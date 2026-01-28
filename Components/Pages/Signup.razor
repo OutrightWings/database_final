@@ -128,7 +128,8 @@ else
             await Db.OpenAsync();
 
             var cmd = new MySqlCommand(
-                "SELECT password, role FROM users WHERE username=@u LIMIT 1", Db);
+                "SELECT id, password, role FROM users WHERE username=@u LIMIT 1", Db);
+
             cmd.Parameters.AddWithValue("@u", username);
 
             var reader = await cmd.ExecuteReaderAsync();
@@ -137,7 +138,7 @@ else
                 loginError = "Invalid username or password.";
                 return;
             }
-
+            int userId = reader.GetInt32("id");  
             string storedHash = reader.GetString("password");
             string userRole = reader.GetString("role");
 
@@ -152,7 +153,7 @@ else
 
             // success — log in
             if (AuthenticationStateProvider is AuthStateProvider auth)
-                auth.SignIn(username, userRole);
+                auth.SignIn(userId, username, userRole);
 
             Nav.NavigateTo("/");
         }

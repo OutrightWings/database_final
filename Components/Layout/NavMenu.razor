@@ -9,7 +9,9 @@
 <input type="checkbox" title="Navigation menu" class="navbar-toggler" />
 
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    
     <nav class="nav flex-column">
+        <CascadingAuthenticationState>
         <!-- Always visible -->
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
@@ -18,7 +20,6 @@
         </div>
 
         <!-- Not logged in -->
-        <CascadingAuthenticationState>
         <AuthorizeView>
             <NotAuthorized>
                 <div class="nav-item px-3">
@@ -28,9 +29,7 @@
                 </div>
             </NotAuthorized>
         </AuthorizeView>
-        </CascadingAuthenticationState>
         <!-- Admin-only pages -->
-        <CascadingAuthenticationState>
         <AuthorizeView Roles="admin">
             <Authorized>
                 <div class="nav-item px-3">
@@ -40,26 +39,22 @@
                 </div>
             </Authorized>
         </AuthorizeView>
-        </CascadingAuthenticationState>
         <!-- faculty-only pages -->
-        <CascadingAuthenticationState>
         <AuthorizeView Roles="faculty">
             <Authorized>
                 <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="Users">
-                        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Manage Users
+                    <NavLink class="nav-link" href="Faculty">
+                        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Approve Students
                     </NavLink>
                 </div>
             </Authorized>
         </AuthorizeView>
-        </CascadingAuthenticationState>
         <!-- student-only pages -->
-        <CascadingAuthenticationState>
         <AuthorizeView Roles="student">
             <Authorized>
                 <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="Users">
-                        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Manage Users
+                    <NavLink class="nav-link" href="Student">
+                        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Grad Information
                     </NavLink>
                 </div>
             </Authorized>

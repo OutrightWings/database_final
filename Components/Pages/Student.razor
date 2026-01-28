@@ -1,0 +1,163 @@
+﻿@page "/Student"
+@attribute [Authorize(Roles = "student")]
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims;
+@inject MySqlConnection Db
+@inject NavigationManager Nav
+
+@rendermode InteractiveServer
+
+<h3>Graduate Information</h3>
+<CascadingAuthenticationState>
+    <AuthorizeView Roles="student">
+        <Authorized Context="authContext">
+            @{
+                // Grab user ID from claims
+                userId = int.Parse(authContext.User.FindFirst(c => c.Type == ClaimTypes.NameIdentifier)!.Value);
+
+                // Load documents if they haven't been loaded yet
+                if (!loadedForUser)
+                {
+                    _ = LoadDocuments();
+                    loadedForUser = true;
+                }
+            }
+
+            <p>Information</p>
+
+            <h4>Your Documents</h4>
+            @if (loading)
+            {
+                <p>Loading...</p>
+            }
+            else if (documents.Count == 0)
+            {
+                <p>No documents uploaded.</p>
+            }
+            else
+            {
+                <ul>
+                    @foreach (var doc in documents)
+                    {
+                        <li>
+                            <a href="@doc.FilePath" target="_blank">@doc.Filename</a> 
+                            (Uploaded: @doc.UploadedAt.ToString("g"))
+                        </li>
+                    }
+                </ul>
+            }
+
+            <h4>Upload Documents</h4>
+
+            <InputFile OnChange="OnFilesSelected" multiple />
+
+            @if (selectedFiles.Count > 0)
+            {
+                <ul>
+                    @foreach (var file in selectedFiles)
+                    {
+                        <li>@file.Name (@file.Size / 1024) KB</li>
+                    }
+                </ul>
+
+                <button class="btn btn-primary" @onclick="UploadSelectedFiles">Upload</button>
+            }
+        </Authorized>
+
+        <NotAuthorized>
+            <p>Access denied.</p>
+        </NotAuthorized>
+    </AuthorizeView>
+</CascadingAuthenticationState>
+
+@code {
+    List<UserDocument> documents = new();
+    List<IBrowserFile> selectedFiles = new();
+    int userId;
+    bool loading = true;
+    bool loadedForUser = false;
+
+    // Called when user selects files
+    private void OnFilesSelected(InputFileChangeEventArgs e)
+    {
+        selectedFiles.Clear();
+        foreach (var file in e.GetMultipleFiles())
+            selectedFiles.Add(file);
+    }
+
+    // Called when user clicks the upload button
+    private async Task UploadSelectedFiles()
+    {
+        if (selectedFiles.Count == 0) return;
+
+
+        var uploadFolder = Path.Combine("wwwroot", "uploads");
+        if (!Directory.Exists(uploadFolder))
+            Directory.CreateDirectory(uploadFolder);
+
+        foreach (var file in selectedFiles)
+        {
+            var path = Path.Combine(uploadFolder, file.Name);
+
+            await using var fs = new FileStream(path, FileMode.Create);
+            await file.OpenReadStream().CopyToAsync(fs);
+
+            // Insert into database
+            await Db.OpenAsync();
+            var cmd = new MySqlCommand(
+                "INSERT INTO user_documents(user_id, filename, file_path) VALUES (@uid, @fname, @fpath)",
+                Db);
+            cmd.Parameters.AddWithValue("@uid", userId);
+            cmd.Parameters.AddWithValue("@fname", file.Name);
+            cmd.Parameters.AddWithValue("@fpath", path);
+            await cmd.ExecuteNonQueryAsync();
+            await Db.CloseAsync();
+        }
+
+        selectedFiles.Clear();
+        await LoadDocuments(); // refresh document list
+    }
+
+    private async Task LoadDocuments()
+    {
+        try
+        {
+            loading = true;
+            documents.Clear();
+
+            await Db.OpenAsync();
+            var cmd = new MySqlCommand(
+                "SELECT id, filename, file_path, uploaded_at FROM user_documents WHERE user_id=@uid ORDER BY uploaded_at DESC",
+                Db);
+            cmd.Parameters.AddWithValue("@uid", userId);
+
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                documents.Add(new UserDocument
+                {
+                    Id = reader.GetInt32("id"),
+                    Filename = reader.GetString("filename"),
+                    FilePath = reader.GetString("file_path"),
+                    UploadedAt = reader.GetDateTime("uploaded_at")
+                });
+            }
+        }
+        finally
+        {
+            await Db.CloseAsync();
+            loading = false;
+            StateHasChanged();
+        }
+    }
+
+    public class UserDocument
+    {
+        public int Id { get; set; }
+        public string Filename { get; set; } = "";
+        public string FilePath { get; set; } = "";
+        public DateTime UploadedAt { get; set; }
+    }
+}

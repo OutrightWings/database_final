@@ -11,11 +11,12 @@ public class AuthStateProvider : AuthenticationStateProvider
         return Task.FromResult(new AuthenticationState(_currentUser));
     }
 
-    public void SignIn(string username, string role)
+    public void SignIn(int userId, string username, string role)
     {
         var identity = new ClaimsIdentity(
             new[]
             {
+                new Claim(ClaimTypes.NameIdentifier, userId.ToString()), // <-- THIS IS THE KEY
                 new Claim(ClaimTypes.Name, username),
                 new Claim(ClaimTypes.Role, role)
             },
@@ -25,6 +26,7 @@ public class AuthStateProvider : AuthenticationStateProvider
         _currentUser = new ClaimsPrincipal(identity);
         NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
     }
+
 
     public void SignOut()
     {

@@ -1,0 +1,26 @@
+﻿@page "/Faculty"
+@attribute [Authorize(Roles = "faculty")]
+
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject MySqlConnection Db
+@inject NavigationManager Nav
+
+@rendermode InteractiveServer
+
+<h3>Verify Graduate Information</h3>
+<CascadingAuthenticationState>
+    <AuthorizeView Roles="faculty">
+        <Authorized>
+
+        </Authorized>
+
+        <NotAuthorized>
+            <p>Access denied.</p>
+        </NotAuthorized>
+    </AuthorizeView>
+</CascadingAuthenticationState>
+@code {
+
+}
