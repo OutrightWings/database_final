@@ -19,6 +19,11 @@
         <input @bind="email" placeholder="Email" class="form-control mt-2" />
         <input @bind="password" type="password" placeholder="Password" class="form-control mt-2" />
 
+        <select @bind="role" class="form-control mt-2">
+            <option value="student">Student</option>
+            <option value="faculty">Faculty</option>
+        </select>
+
         <button type="button" class="btn btn-primary mt-3" @onclick="CreateUser">
             Create Account
         </button>
@@ -26,6 +31,7 @@
         <p class="text-danger">@signupError</p>
     </div>
 }
+
 else
 {
     <!-- LOGIN FORM -->
@@ -45,6 +51,7 @@ else
     string username = "";
     string password = "";
     string email = "";
+    string role = "student"; 
 
     bool isSignupMode = false;
 
@@ -69,15 +76,26 @@ else
         {
             await Db.OpenAsync();
 
+            //Security Check
+            if (role != "student" && role != "faculty")
+            {
+                signupError = "Invalid role selection.";
+                return;
+            }
+
+
             string hash = BCrypt.HashPassword(password);
 
             var cmd = new MySqlCommand(
-                "INSERT INTO users (username, email, password, create_datetime) VALUES (@u, @e, @p, NOW())",
+                "INSERT INTO users (username, email, password, role, create_datetime) " +
+                "VALUES (@u, @e, @p, @r, NOW())",
                 Db);
 
             cmd.Parameters.AddWithValue("@u", username);
             cmd.Parameters.AddWithValue("@e", email);
             cmd.Parameters.AddWithValue("@p", hash);
+            cmd.Parameters.AddWithValue("@r", role);
+
 
             int rows = await cmd.ExecuteNonQueryAsync();
 
@@ -110,26 +128,31 @@ else
             await Db.OpenAsync();
 
             var cmd = new MySqlCommand(
-                "SELECT password FROM users WHERE username=@u LIMIT 1", Db);
+                "SELECT password, role FROM users WHERE username=@u LIMIT 1", Db);
             cmd.Parameters.AddWithValue("@u", username);
 
-            var result = await cmd.ExecuteScalarAsync();
-            if (result == null)
+            var reader = await cmd.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
             {
                 loginError = "Invalid username or password.";
                 return;
             }
 
-            string storedHash = result.ToString()!;
+            string storedHash = reader.GetString("password");
+            string userRole = reader.GetString("role");
+
+
             if (!BCrypt.Verify(password, storedHash))
             {
                 loginError = "Invalid username or password.";
                 return;
             }
 
+            
+
             // success — log in
             if (AuthenticationStateProvider is AuthStateProvider auth)
-                auth.SignIn(username);
+                auth.SignIn(username, userRole);
 
             Nav.NavigateTo("/");
         }

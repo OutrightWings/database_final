@@ -3,21 +3,24 @@ using System.Security.Claims;
 
 public class AuthStateProvider : AuthenticationStateProvider
 {
-    private ClaimsPrincipal _currentUser = new ClaimsPrincipal(new ClaimsIdentity());
+    private ClaimsPrincipal _currentUser =
+        new ClaimsPrincipal(new ClaimsIdentity());
 
     public override Task<AuthenticationState> GetAuthenticationStateAsync()
     {
         return Task.FromResult(new AuthenticationState(_currentUser));
     }
 
-    public void SignIn(string username)
+    public void SignIn(string username, string role)
     {
         var identity = new ClaimsIdentity(
             new[]
             {
-                new Claim(ClaimTypes.Name, username)
-            }, 
-            "serverAuth");
+                new Claim(ClaimTypes.Name, username),
+                new Claim(ClaimTypes.Role, role)
+            },
+            "serverAuth"
+        );
 
         _currentUser = new ClaimsPrincipal(identity);
         NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
