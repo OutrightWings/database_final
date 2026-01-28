@@ -4,6 +4,9 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using System.Security.Claims;
+@inject AuthenticationStateProvider AuthStateProvider
+@inject StudentCode Sc
+@inject UserDocument Ud
 @inject MySqlConnection Db
 @inject NavigationManager Nav
 
@@ -13,22 +16,11 @@
 <CascadingAuthenticationState>
     <AuthorizeView Roles="student">
         <Authorized Context="authContext">
-            @{
-                // Grab user ID from claims
-                userId = int.Parse(authContext.User.FindFirst(c => c.Type == ClaimTypes.NameIdentifier)!.Value);
-
-                // Load documents if they haven't been loaded yet
-                if (!loadedForUser)
-                {
-                    _ = LoadDocuments();
-                    loadedForUser = true;
-                }
-            }
-
+            
             <p>Information</p>
 
             <h4>Your Documents</h4>
-            @if (loading)
+            @if (loadingDocuments)
             {
                 <p>Loading...</p>
             }
@@ -42,8 +34,11 @@
                     @foreach (var doc in documents)
                     {
                         <li>
-                            <a href="@doc.FilePath" target="_blank">@doc.Filename</a> 
+                            <a href="@doc.FilePath" download="@doc.Filename">@doc.Filename</a> 
                             (Uploaded: @doc.UploadedAt.ToString("g"))
+                            <button class="btn btn-sm btn-danger ms-2" @onclick="() => DeleteDocument(doc.Id, doc.FilePath)">
+                                Delete
+                            </button>
                         </li>
                     }
                 </ul>
@@ -64,6 +59,45 @@
 
                 <button class="btn btn-primary" @onclick="UploadSelectedFiles">Upload</button>
             }
+
+            <h4>Approval Codes</h4>
+            @if (loadingCodes)
+            {
+                <p>Loading...</p>
+            }
+            else if (codes.Count == 0)
+            {
+                <p>No codes generated yet.</p>
+            }
+            else
+            {
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Code</th>
+                            <th>Date Generated</th>
+                            <th>Approved</th>
+                            <th>Date Approved</th>
+                            <th>Approved By</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in codes)
+                        {
+                            <tr>
+                                <td>@c.Code</td>
+                                <td>@c.DateGenerated.ToString("g")</td>
+                                <td>@(c.Approved ? "Yes" : "No")</td>
+                                <td>@(c.DateApproved?.ToString("g") ?? "-")</td>
+                                <td>@(c.ApprovalUsername ?? "-")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+
+            <button class="btn btn-success mt-2" @onclick="GenerateCode">Generate New Code</button>
+
         </Authorized>
 
         <NotAuthorized>
@@ -73,25 +107,66 @@
 </CascadingAuthenticationState>
 
 @code {
+    List<StudentCode> codes = new();
+
     List<UserDocument> documents = new();
     List<IBrowserFile> selectedFiles = new();
     int userId;
-    bool loading = true;
-    bool loadedForUser = false;
+    bool loadingDocuments = true;
+    bool loadingCodes = true;
+    
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
 
-    // Called when user selects files
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            userId = int.Parse(user.FindFirst(c => c.Type == ClaimTypes.NameIdentifier)!.Value);
+
+            await LoadDocuments();
+            await LoadStudentCodes();
+        }
+    }
     private void OnFilesSelected(InputFileChangeEventArgs e)
     {
         selectedFiles.Clear();
+        StateHasChanged();
         foreach (var file in e.GetMultipleFiles())
             selectedFiles.Add(file);
     }
+    private async Task DeleteDocument(int docId, string filePath)
+    {
+        try
+        {
+            // Remove file from disk
+            var fullPath = Path.Combine(Environment.CurrentDirectory, "wwwroot", filePath.TrimStart('/'));
+            if (File.Exists(fullPath))
+            {
+                File.Delete(fullPath);
+            }
 
-    // Called when user clicks the upload button
+            // Remove record from DB
+            await Db.OpenAsync();
+            var cmd = new MySqlCommand(
+                "DELETE FROM user_documents WHERE id=@id AND user_id=@uid",
+                Db);
+            cmd.Parameters.AddWithValue("@id", docId);
+            cmd.Parameters.AddWithValue("@uid", userId);
+            await cmd.ExecuteNonQueryAsync();
+            await Db.CloseAsync();
+
+            // Refresh list
+            await LoadDocuments();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to delete document: {ex.Message}");
+        }
+    }
     private async Task UploadSelectedFiles()
     {
         if (selectedFiles.Count == 0) return;
-
 
         var uploadFolder = Path.Combine("wwwroot", "uploads");
         if (!Directory.Exists(uploadFolder))
@@ -99,7 +174,10 @@
 
         foreach (var file in selectedFiles)
         {
-            var path = Path.Combine(uploadFolder, file.Name);
+            // Generate unique filename: userId + timestamp + original filename
+            var timestamp = DateTime.Now.ToString("yyyyMMddHHmmssfff");
+            var uniqueName = $"{userId}_{timestamp}_{file.Name}";
+            var path = Path.Combine(uploadFolder, uniqueName);
 
             await using var fs = new FileStream(path, FileMode.Create);
             await file.OpenReadStream().CopyToAsync(fs);
@@ -110,21 +188,21 @@
                 "INSERT INTO user_documents(user_id, filename, file_path) VALUES (@uid, @fname, @fpath)",
                 Db);
             cmd.Parameters.AddWithValue("@uid", userId);
-            cmd.Parameters.AddWithValue("@fname", file.Name);
-            cmd.Parameters.AddWithValue("@fpath", path);
+            cmd.Parameters.AddWithValue("@fname", file.Name); // original filename
+            cmd.Parameters.AddWithValue("@fpath", $"/uploads/{uniqueName}"); // relative path for download
             await cmd.ExecuteNonQueryAsync();
             await Db.CloseAsync();
         }
 
         selectedFiles.Clear();
+        StateHasChanged();
         await LoadDocuments(); // refresh document list
     }
-
     private async Task LoadDocuments()
     {
         try
         {
-            loading = true;
+            loadingDocuments = true;
             documents.Clear();
 
             await Db.OpenAsync();
@@ -148,16 +226,69 @@
         finally
         {
             await Db.CloseAsync();
-            loading = false;
+            loadingDocuments = false;
             StateHasChanged();
         }
     }
-
-    public class UserDocument
+    private async Task LoadStudentCodes()
     {
-        public int Id { get; set; }
-        public string Filename { get; set; } = "";
-        public string FilePath { get; set; } = "";
-        public DateTime UploadedAt { get; set; }
+        try
+        {
+            loadingCodes = true;
+            codes.Clear();
+        
+            await Db.OpenAsync();
+            codes.Clear();
+
+            var cmd = new MySqlCommand(@"
+                SELECT sc.id, sc.code, sc.date_generated, sc.approved, sc.date_approved, sc.approval_userid, u.username AS approval_username
+                FROM student_codes sc
+                LEFT JOIN users u ON sc.approval_userid = u.id
+                WHERE sc.user_id = @uid
+                ORDER BY sc.date_generated DESC
+            ", Db);
+
+            cmd.Parameters.AddWithValue("@uid", userId);
+
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                codes.Add(new StudentCode
+                {
+                    Id = reader.GetInt32("id"),
+                    Code = reader.GetString("code"),
+                    DateGenerated = reader.GetDateTime("date_generated"),
+                    Approved = reader.GetBoolean("approved"),
+                    DateApproved = reader.IsDBNull(reader.GetOrdinal("date_approved")) ? null : reader.GetDateTime(reader.GetOrdinal("date_approved")),
+                    ApprovalUserId = reader.IsDBNull(reader.GetOrdinal("approval_userid")) ? null : reader.GetInt32(reader.GetOrdinal("approval_userid")),
+                    ApprovalUsername = reader.IsDBNull(reader.GetOrdinal("approval_username")) ? null : reader.GetString(reader.GetOrdinal("approval_username"))
+                });
+            }
+        }
+        finally
+        {
+            await Db.CloseAsync();
+            loadingCodes = false;
+            StateHasChanged();
+        }
     }
+    private async Task GenerateCode()
+    {
+        string code = $"{userId}-{DateTime.Now:yyyyMMddHHmmss}";
+
+        await Db.OpenAsync();
+        var cmd = new MySqlCommand(
+            "INSERT INTO student_codes (user_id, code) VALUES (@uid, @code)",
+            Db
+        );
+
+        cmd.Parameters.AddWithValue("@uid", userId);
+        cmd.Parameters.AddWithValue("@code", code);
+
+        await cmd.ExecuteNonQueryAsync();
+        await Db.CloseAsync();
+
+        await LoadStudentCodes();
+    }
+
 }

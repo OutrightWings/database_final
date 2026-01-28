@@ -81,4 +81,4 @@ c:\Users\Lily\Documents\Uidaho\database\Database\obj\Debug\net9.0\Database.cspro
 C:\Users\Lily\Documents\Uidaho\database\Database\obj\Debug\net9.0\Database.csproj.Up2Date
 c:\Users\Lily\Documents\Uidaho\database\Database\bin\Debug\net9.0\BCrypt.Net-Next.dll
 c:\Users\Lily\Documents\Uidaho\database\Database\obj\Debug\net9.0\compressed\9c4nicnbuo-s1cs64e2zi.gz
-c:\Users\Lily\Documents\Uidaho\database\Database\obj\Debug\net9.0\compressed\46ad3l0nct-z81rfbw075.gz
+c:\Users\Lily\Documents\Uidaho\database\Database\obj\Debug\net9.0\compressed\8yugn0za4d-z81rfbw075.gz

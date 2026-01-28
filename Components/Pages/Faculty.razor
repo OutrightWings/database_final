@@ -3,16 +3,95 @@
 
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
-
+@using System.Security.Claims
+@inject AuthenticationStateProvider AuthStateProvider
 @inject MySqlConnection Db
-@inject NavigationManager Nav
+@inject StudentCode Sc
+@inject UserDocument Ud
 
 @rendermode InteractiveServer
 
-<h3>Verify Graduate Information</h3>
+<h3>Student Approval Portal</h3>
 <CascadingAuthenticationState>
     <AuthorizeView Roles="faculty">
-        <Authorized>
+        <Authorized Context="authContext">
+
+            <p>Enter a student code to load their information:</p>
+            <InputText @bind-Value="searchCode" placeholder="Enter code..." class="form-control mb-2"/>
+            <button class="btn btn-primary mb-3" @onclick="LoadStudentByCode">Load Student</button>
+
+            @if (loading)
+            {
+                <p>Loading...</p>
+            }
+            else if (!studentLoaded)
+            {
+                <p>No student loaded.</p>
+            }
+            else
+            {
+                <h4>Student Information</h4>
+                <p><strong>Student ID:</strong> @studentId</p>
+
+                <h4>Documents</h4>
+                @if (documents.Count == 0)
+                {
+                    <p>No documents uploaded.</p>
+                }
+                else
+                {
+                    <ul>
+                        @foreach (var doc in documents)
+                        {
+                            <li>
+                                <a href="@doc.FilePath" download="@doc.Filename">@doc.Filename</a>
+                                (Uploaded: @doc.UploadedAt.ToString("g"))
+                            </li>
+                        }
+                    </ul>
+                }
+
+                <h4>Approval Codes</h4>
+                @if (codes.Count == 0)
+                {
+                    <p>No codes generated yet.</p>
+                }
+                else
+                {
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Code</th>
+                                <th>Date Generated</th>
+                                <th>Approved</th>
+                                <th>Date Approved</th>
+                                <th>Approved By</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var c in codes)
+                            {
+                                <tr>
+                                    <td>@c.Code</td>
+                                    <td>@c.DateGenerated.ToString("g")</td>
+                                    <td>@(c.Approved ? "Yes" : "No")</td>
+                                    <td>@(c.DateApproved?.ToString("g") ?? "-")</td>
+                                    <td>@(c.ApprovalUsername ?? "-")</td>
+                                    <td>
+                                        @if (c.Id == currentCodeId && c.ApprovalUsername == null)
+                                        {
+                                            <button class="btn btn-success btn-sm me-1" @onclick="() => ApproveCode(c.Id)">Approve</button>
+                                            <button class="btn btn-danger btn-sm" @onclick="() => DisapproveCode(c.Id)">Disapprove</button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+
+                }
+            }
 
         </Authorized>
 
@@ -21,6 +100,155 @@
         </NotAuthorized>
     </AuthorizeView>
 </CascadingAuthenticationState>
-@code {
 
+@code {
+    string searchCode = "";
+    int studentId;
+    bool studentLoaded = false;
+    bool loading = false;
+    string? currentCode;
+    int? currentCodeId;
+
+
+    List<UserDocument> documents = new();
+    List<StudentCode> codes = new();
+
+    int facultyId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Get faculty ID
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            facultyId = int.Parse(user.FindFirst(c => c.Type == ClaimTypes.NameIdentifier)!.Value);
+        }
+    }
+
+    private async Task LoadStudentByCode()
+    {
+        if (string.IsNullOrWhiteSpace(searchCode)) return;
+
+        loading = true;
+        studentLoaded = false;
+        documents.Clear();
+        codes.Clear();
+
+        try
+        {
+            await Db.OpenAsync();
+            currentCode = searchCode; 
+            var cmd = new MySqlCommand(
+                "SELECT id, user_id FROM student_codes WHERE code = @code LIMIT 1",
+                Db);
+            cmd.Parameters.AddWithValue("@code", searchCode);
+
+            using var reader = await cmd.ExecuteReaderAsync();
+            if (!reader.Read())
+            {
+                loading = false;
+                return;
+            }
+
+            currentCodeId = reader.GetInt32("id");
+            studentId = reader.GetInt32("user_id");
+
+            await LoadStudentDocuments();
+            await LoadStudentCodes();
+
+            studentLoaded = true;
+        }
+        finally
+        {
+            await Db.CloseAsync();
+            loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadStudentDocuments()
+    {
+        documents.Clear();
+
+        await using var conn = new MySqlConnection(Db.ConnectionString);
+        await conn.OpenAsync();
+
+        var cmd = new MySqlCommand(
+            "SELECT id, filename, file_path, uploaded_at FROM user_documents WHERE user_id=@uid ORDER BY uploaded_at DESC",
+            conn);
+        cmd.Parameters.AddWithValue("@uid", studentId);
+
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            documents.Add(new UserDocument
+            {
+                Id = reader.GetInt32("id"),
+                Filename = reader.GetString("filename"),
+                FilePath = reader.GetString("file_path"),
+                UploadedAt = reader.GetDateTime("uploaded_at")
+            });
+        }
+    }
+
+    private async Task LoadStudentCodes()
+    {
+        codes.Clear();
+
+        await using var conn = new MySqlConnection(Db.ConnectionString);
+        await conn.OpenAsync();
+
+        var cmd = new MySqlCommand(@"
+            SELECT sc.id, sc.code, sc.date_generated, sc.approved, sc.date_approved, sc.approval_userid, u.username AS approval_username
+            FROM student_codes sc
+            LEFT JOIN users u ON sc.approval_userid = u.id
+            WHERE sc.user_id = @uid
+            ORDER BY sc.date_generated DESC
+        ", conn);
+        cmd.Parameters.AddWithValue("@uid", studentId);
+
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            codes.Add(new StudentCode
+            {
+                Id = reader.GetInt32("id"),
+                Code = reader.GetString("code"),
+                DateGenerated = reader.GetDateTime("date_generated"),
+                Approved = reader.GetBoolean("approved"),
+                DateApproved = reader.IsDBNull(reader.GetOrdinal("date_approved")) ? null : reader.GetDateTime(reader.GetOrdinal("date_approved")),
+                ApprovalUserId = reader.IsDBNull(reader.GetOrdinal("approval_userid")) ? null : reader.GetInt32(reader.GetOrdinal("approval_userid")),
+                ApprovalUsername = reader.IsDBNull(reader.GetOrdinal("approval_username")) ? null : reader.GetString(reader.GetOrdinal("approval_username"))
+            });
+        }
+    }
+
+    private async Task ApproveCode(int codeId) => await UpdateCodeApproval(codeId, true);
+    private async Task DisapproveCode(int codeId) => await UpdateCodeApproval(codeId, false);
+
+    private async Task UpdateCodeApproval(int codeId, bool approved)
+    {
+        await using var conn = new MySqlConnection(Db.ConnectionString);
+        await conn.OpenAsync();
+
+        var cmd = new MySqlCommand(@"
+            UPDATE student_codes
+            SET approved = @approved,
+                date_approved = @date,
+                approval_userid = @facultyId
+            WHERE id = @codeId
+        ", conn);
+
+        cmd.Parameters.AddWithValue("@approved", approved);
+        cmd.Parameters.AddWithValue("@date", DateTime.Now);
+        cmd.Parameters.AddWithValue("@facultyId", facultyId);
+        cmd.Parameters.AddWithValue("@codeId", codeId);
+
+        await cmd.ExecuteNonQueryAsync();
+
+        // Reload codes to reflect approval
+        await LoadStudentCodes();
+        StateHasChanged();
+    }
 }
