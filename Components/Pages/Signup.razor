@@ -2,6 +2,8 @@
 
 @inject MySqlConnection Db
 @inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
 @rendermode InteractiveServer
 
 <h3>@(isSignupMode ? "Create Account" : "Login")</h3>
@@ -15,7 +17,11 @@
 {
     <!-- SIGNUP FORM -->
     <div>
-        <input @bind="username" placeholder="Username" class="form-control" />
+        <input @bind="firstName" placeholder="First Name" class="form-control mt-2" />
+        <input @bind="lastName" placeholder="Last Name" class="form-control mt-2" />
+        <input @bind="schoolId" placeholder="School ID" class="form-control mt-2" />
+
+        <input @bind="username" placeholder="Username" class="form-control mt-2" />
         <input @bind="email" placeholder="Email" class="form-control mt-2" />
         <input @bind="password" type="password" placeholder="Password" class="form-control mt-2" />
 
@@ -31,12 +37,11 @@
         <p class="text-danger">@signupError</p>
     </div>
 }
-
 else
 {
     <!-- LOGIN FORM -->
     <div>
-        <input @bind="username" placeholder="Username" class="form-control" />
+        <input @bind="username" placeholder="Username" class="form-control mt-2" />
         <input @bind="password" type="password" placeholder="Password" class="form-control mt-2" />
 
         <button class="btn btn-primary mt-3" @onclick="DoLogin">
@@ -48,10 +53,15 @@ else
 }
 
 @code {
+    // --- FORM FIELDS ---
+    string firstName = "";
+    string lastName = "";
+    string schoolId = "";
+
     string username = "";
     string password = "";
     string email = "";
-    string role = "student"; 
+    string role = "student";
 
     bool isSignupMode = false;
 
@@ -63,9 +73,14 @@ else
         isSignupMode = signup;
         loginError = "";
         signupError = "";
+
+        firstName = "";
+        lastName = "";
+        schoolId = "";
         username = "";
         password = "";
         email = "";
+        role = "student";
     }
 
     private async Task CreateUser()
@@ -76,33 +91,45 @@ else
         {
             await Db.OpenAsync();
 
-            //Security Check
+            // --- ROLE VALIDATION ---
             if (role != "student" && role != "faculty")
             {
                 signupError = "Invalid role selection.";
                 return;
             }
 
+            // --- BASIC FIELD VALIDATION ---
+            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password) ||
+                string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(firstName) ||
+                string.IsNullOrWhiteSpace(lastName) || string.IsNullOrWhiteSpace(schoolId))
+            {
+                signupError = "All fields are required.";
+                return;
+            }
 
             string hash = BCrypt.HashPassword(password);
 
             var cmd = new MySqlCommand(
-                "INSERT INTO users (username, email, password, role, create_datetime) " +
-                "VALUES (@u, @e, @p, @r, NOW())",
+                @"INSERT INTO users 
+                    (username, email, password, role, create_datetime, first_name, last_name, school_id) 
+                  VALUES 
+                    (@u, @e, @p, @r, NOW(), @fn, @ln, @sid)",
                 Db);
 
             cmd.Parameters.AddWithValue("@u", username);
             cmd.Parameters.AddWithValue("@e", email);
             cmd.Parameters.AddWithValue("@p", hash);
             cmd.Parameters.AddWithValue("@r", role);
-
+            cmd.Parameters.AddWithValue("@fn", firstName);
+            cmd.Parameters.AddWithValue("@ln", lastName);
+            cmd.Parameters.AddWithValue("@sid", schoolId);
 
             int rows = await cmd.ExecuteNonQueryAsync();
 
             if (rows > 0)
             {
                 signupError = "";
-                isSignupMode = false; // switch to login mode
+                isSignupMode = false; // switch to login
             }
             else
             {
@@ -138,18 +165,16 @@ else
                 loginError = "Invalid username or password.";
                 return;
             }
-            int userId = reader.GetInt32("id");  
+
+            int userId = reader.GetInt32("id");
             string storedHash = reader.GetString("password");
             string userRole = reader.GetString("role");
-
 
             if (!BCrypt.Verify(password, storedHash))
             {
                 loginError = "Invalid username or password.";
                 return;
             }
-
-            
 
             // success — log in
             if (AuthenticationStateProvider is AuthStateProvider auth)
@@ -166,7 +191,4 @@ else
             await Db.CloseAsync();
         }
     }
-
-    [Inject]
-    public AuthenticationStateProvider AuthenticationStateProvider { get; set; } = default!;
 }

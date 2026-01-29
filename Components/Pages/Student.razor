@@ -236,12 +236,13 @@
         {
             loadingCodes = true;
             codes.Clear();
-        
+
             await Db.OpenAsync();
-            codes.Clear();
 
             var cmd = new MySqlCommand(@"
-                SELECT sc.id, sc.code, sc.date_generated, sc.approved, sc.date_approved, sc.approval_userid, u.username AS approval_username
+                SELECT sc.id, sc.code, sc.date_generated, sc.approved, sc.date_approved, sc.approval_userid,
+                    u.first_name AS approver_first_name,
+                    u.last_name AS approver_last_name
                 FROM student_codes sc
                 LEFT JOIN users u ON sc.approval_userid = u.id
                 WHERE sc.user_id = @uid
@@ -259,9 +260,15 @@
                     Code = reader.GetString("code"),
                     DateGenerated = reader.GetDateTime("date_generated"),
                     Approved = reader.GetBoolean("approved"),
-                    DateApproved = reader.IsDBNull(reader.GetOrdinal("date_approved")) ? null : reader.GetDateTime(reader.GetOrdinal("date_approved")),
-                    ApprovalUserId = reader.IsDBNull(reader.GetOrdinal("approval_userid")) ? null : reader.GetInt32(reader.GetOrdinal("approval_userid")),
-                    ApprovalUsername = reader.IsDBNull(reader.GetOrdinal("approval_username")) ? null : reader.GetString(reader.GetOrdinal("approval_username"))
+                    DateApproved = reader.IsDBNull(reader.GetOrdinal("date_approved")) 
+                                    ? null 
+                                    : reader.GetDateTime(reader.GetOrdinal("date_approved")),
+                    ApprovalUserId = reader.IsDBNull(reader.GetOrdinal("approval_userid")) 
+                                    ? null 
+                                    : reader.GetInt32(reader.GetOrdinal("approval_userid")),
+                    ApprovalUsername = reader.IsDBNull(reader.GetOrdinal("approver_first_name")) 
+                                    ? null 
+                                    : $"{reader.GetString("approver_first_name")} {reader.GetString("approver_last_name")}"
                 });
             }
         }

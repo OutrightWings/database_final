@@ -26,7 +26,9 @@
             else
             {
                 <h4>Student Information</h4>
-                <p><strong>Student ID:</strong> @studentId</p>
+                <p><strong>Name:</strong> @studentFirstName @studentLastName</p>
+                <p><strong>School ID:</strong> @studentSchoolId</p>
+
 
                 <h4 class="mt-4">Student Documents</h4>
 
@@ -124,6 +126,9 @@
     string? searchCode;
     int? studentId;
     int? currentCodeId;
+    string? studentFirstName;
+    string? studentLastName;
+    string? studentSchoolId;
 
     List<UserDocument> documents = new();
     List<IBrowserFile> selectedFiles = new();
@@ -138,9 +143,18 @@
 
         await Db.OpenAsync();
 
-        var cmd = new MySqlCommand(
-            "SELECT id, user_id FROM student_codes WHERE code = @code LIMIT 1",
-            Db);
+        // Grab the student ID and their name/school info
+        var cmd = new MySqlCommand(@"
+            SELECT sc.id AS code_id,
+                u.id AS student_id,
+                u.first_name,
+                u.last_name,
+                u.school_id
+            FROM student_codes sc
+            INNER JOIN users u ON sc.user_id = u.id
+            WHERE sc.code = @code
+            LIMIT 1
+        ", Db);
         cmd.Parameters.AddWithValue("@code", searchCode);
 
         using var reader = await cmd.ExecuteReaderAsync();
@@ -154,8 +168,12 @@
             return;
         }
 
-        currentCodeId = reader.GetInt32("id");
-        studentId = reader.GetInt32("user_id");
+        currentCodeId = reader.GetInt32("code_id");
+        studentId = reader.GetInt32("student_id");
+        studentFirstName = reader.GetString("first_name");
+        studentLastName = reader.GetString("last_name");
+        studentSchoolId = reader.GetString("school_id");
+
         await Db.CloseAsync();
 
         await LoadStudentDocuments();
@@ -238,9 +256,11 @@
 
         await Db.OpenAsync();
         var cmd = new MySqlCommand(@"
-            SELECT sc.id, sc.code, sc.date_generated, sc.approved, sc.date_approved, sc.approval_userid, u.username AS approval_username
+            SELECT sc.id, sc.code, sc.date_generated, sc.approved, sc.date_approved,
+                approver.first_name AS approver_first_name,
+                approver.last_name AS approver_last_name
             FROM student_codes sc
-            LEFT JOIN users u ON sc.approval_userid = u.id
+            LEFT JOIN users approver ON sc.approval_userid = approver.id
             WHERE sc.user_id = @uid
             ORDER BY sc.date_generated DESC
         ", Db);
@@ -256,8 +276,10 @@
                 DateGenerated = reader.GetDateTime("date_generated"),
                 Approved = reader.GetBoolean("approved"),
                 DateApproved = reader.IsDBNull(reader.GetOrdinal("date_approved")) ? null : reader.GetDateTime(reader.GetOrdinal("date_approved")),
-                ApprovalUserId = reader.IsDBNull(reader.GetOrdinal("approval_userid")) ? null : reader.GetInt32(reader.GetOrdinal("approval_userid")),
-                ApprovalUsername = reader.IsDBNull(reader.GetOrdinal("approval_username")) ? null : reader.GetString(reader.GetOrdinal("approval_username"))
+                ApprovalUserId = null, // optional
+                ApprovalUsername = reader.IsDBNull(reader.GetOrdinal("approver_first_name"))
+                                    ? null
+                                    : $"{reader.GetString("approver_first_name")} {reader.GetString("approver_last_name")}"
             });
         }
         await Db.CloseAsync();

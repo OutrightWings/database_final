@@ -16,7 +16,7 @@ public class AuthStateProvider : AuthenticationStateProvider
         var identity = new ClaimsIdentity(
             new[]
             {
-                new Claim(ClaimTypes.NameIdentifier, userId.ToString()), // <-- THIS IS THE KEY
+                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
                 new Claim(ClaimTypes.Name, username),
                 new Claim(ClaimTypes.Role, role)
             },
